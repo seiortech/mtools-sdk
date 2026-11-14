@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "code": "en",
+    "name": "English",
+    "author": "Example Publisher"
+  },
+  "strings": {
+    "tools.echo.name": "Echo",
+    "fields.text.label": "Message",
+    "actions.echo.label": "Run Echo"
+  }
+}

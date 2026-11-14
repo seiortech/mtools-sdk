@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "code": "id",
+    "name": "Bahasa Indonesia",
+    "author": "Example Publisher"
+  },
+  "strings": {
+    "tools.echo.name": "Gema",
+    "fields.text.label": "Pesan",
+    "actions.echo.label": "Jalankan Gema"
+  }
+}

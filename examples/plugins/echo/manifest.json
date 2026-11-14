@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "org.example.echo",
+  "name": "Echo Plugin",
+  "version": "1.0.0",
+  "description": "Standalone external plugin reference that echoes text inputs.",
+  "publisher": {
+    "name": "Example Publisher"
+  },
+  "capabilities": ["process"],
+  "entry": {
+    "kind": "sidecar",
+    "path": "bin/tool",
+    "protocol": "jsonrpc-stdio-v1"
+  },
+  "tools": [
+    {
+      "id": "echo",
+      "name": "Echo",
+      "description": "Echoes text back via JSON-RPC stdio protocol.",
+      "category": "Examples"
+    }
+  ]
+}
