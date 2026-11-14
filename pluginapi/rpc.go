@@ -58,11 +58,23 @@ type InspectParams struct {
 	Settings map[string]string   `json:"settings,omitempty"`
 }
 
+type InspectPreview struct {
+	Title        string   `json:"title"`
+	Subtitle     string   `json:"subtitle,omitempty"`
+	Meta         []string `json:"meta,omitempty"`
+	ThumbnailURL string   `json:"thumbnail_url,omitempty"`
+	Dismissible  bool     `json:"dismissible,omitempty"`
+}
+
 type InspectResult struct {
 	Fields         map[string]InspectFieldUpdate `json:"fields,omitempty"`
 	Metadata       map[string]string             `json:"metadata,omitempty"`
+	Preview        *InspectPreview               `json:"preview,omitempty"`
+	IsPlaylist     bool                          `json:"is_playlist,omitempty"`
 	CommandPreview string                        `json:"command_preview,omitempty"`
 	HelperStatus   map[string]HelperStatus       `json:"helper_status,omitempty"`
+	Logs           []string                      `json:"logs,omitempty"`
+	Error          string                        `json:"error,omitempty"`
 }
 
 type InspectFieldUpdate struct {
@@ -73,6 +85,7 @@ type InspectFieldUpdate struct {
 
 type HelperStatus struct {
 	Found   bool   `json:"found"`
+	Needed  bool   `json:"needed,omitempty"`
 	Path    string `json:"path,omitempty"`
 	Version string `json:"version,omitempty"`
 	Message string `json:"message,omitempty"`
@@ -288,11 +301,16 @@ func (p InspectParams) Validate() error {
 }
 
 func (r InspectResult) Validate() error {
-	if len(r.Fields) > 64 || len(r.Metadata) > 64 || len(r.HelperStatus) > 16 {
+	if len(r.Fields) > 64 || len(r.Metadata) > 64 || len(r.HelperStatus) > 16 || len(r.Logs) > 512 {
 		return ErrProtocol
 	}
-	if len(r.CommandPreview) > 8192 {
+	if len(r.CommandPreview) > 8192 || !textOK(r.Error, 512, false) {
 		return ErrProtocol
+	}
+	for _, l := range r.Logs {
+		if !textOK(l, 2048, false) {
+			return ErrProtocol
+		}
 	}
 	return nil
 }

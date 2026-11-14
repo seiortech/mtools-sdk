@@ -126,6 +126,99 @@ func TestSurfaceInputs(t *testing.T) {
 	}
 }
 
+func TestSurfaceSectionsChecklistChipsAndConditions(t *testing.T) {
+	m := validManifest()
+	d := SurfaceDocument{
+		Schema: 1,
+		Tools: []ToolSurface{{
+			ID: "echo",
+			Fields: []SurfaceField{
+				{ID: "url", Kind: "text", Label: "URL", Grow: true, Required: true},
+				{ID: "mode", Kind: "select", Label: "Mode", Default: "a", Options: []SurfaceOption{{Label: "A", Value: "a"}, {Label: "B", Value: "b"}}},
+				{ID: "cats", Kind: "chips", Label: "Categories", Options: []SurfaceOption{{Label: "One", Value: "one"}, {Label: "Two", Value: "two"}}, VisibleWhen: &SurfaceCondition{Field: "mode", Equals: "b"}},
+				{ID: "items", Kind: "checklist", Label: "Items", Dynamic: true},
+			},
+			Actions: []SurfaceAction{
+				{ID: "preview", Label: "Preview", Kind: "inspect", Inputs: []string{"url"}},
+				{ID: "run", Label: "Run", Kind: "run", Inputs: []string{"url", "mode", "cats", "items"}},
+			},
+			Sections: []SurfaceSection{
+				{ID: "hero", Layout: "primary", Fields: []string{"url"}, Actions: []string{"preview", "run"}},
+				{ID: "opts", Layout: "tabs", Groups: []SurfaceSection{
+					{ID: "tab_a", Label: "General", Layout: "wrap", Fields: []string{"mode", "cats"}},
+					{ID: "tab_b", Label: "Grid", Layout: "grid", Columns: 2, Fields: []string{"items"}},
+				}},
+				{ID: "adv", Label: "Advanced", Layout: "collapsible", DefaultOpen: false, Groups: []SurfaceSection{
+					{ID: "adv_row", Layout: "horizontal", Fields: []string{"mode"}},
+					{ID: "adv_col", Layout: "vertical", Fields: []string{"cats"}},
+				}},
+			},
+		}},
+	}
+	if err := d.Validate(m); err != nil {
+		t.Fatalf("valid extended surface rejected: %v", err)
+	}
+	raw, _ := json.Marshal(d)
+	if _, err := DecodeSurfaces(raw, m); err != nil {
+		t.Fatalf("DecodeSurfaces rejected extended surface: %v", err)
+	}
+
+	inputs, err := d.Tools[0].Inputs("run", map[string][]string{
+		"url":   {"https://example.com"},
+		"mode":  {"b"},
+		"cats":  {"one", "two"},
+		"items": {"v1", "v2"},
+	})
+	if err != nil || len(inputs["cats"]) != 2 || len(inputs["items"]) != 2 {
+		t.Fatalf("Inputs failed: %v %+v", err, inputs)
+	}
+
+	// Negative validation checks
+	for name, mutate := range map[string]func(*SurfaceDocument){
+		"bad layout":       func(doc *SurfaceDocument) { doc.Tools[0].Sections[0].Layout = "carousel" },
+		"bad grid cols":    func(doc *SurfaceDocument) { doc.Tools[0].Sections[1].Groups[1].Columns = 5 },
+		"cols on non-grid": func(doc *SurfaceDocument) { doc.Tools[0].Sections[0].Columns = 2 },
+		"bad action kind":  func(doc *SurfaceDocument) { doc.Tools[0].Actions[0].Kind = "eval" },
+		"self visible":     func(doc *SurfaceDocument) { doc.Tools[0].Fields[2].VisibleWhen.Field = "cats" },
+		"unknown visible":  func(doc *SurfaceDocument) { doc.Tools[0].Fields[2].VisibleWhen.Field = "missing" },
+		"bad history width": func(doc *SurfaceDocument) {
+			doc.Tools[0].History = &SurfaceHistory{DefaultWidth: 100}
+		},
+		"bad history button action": func(doc *SurfaceDocument) {
+			doc.Tools[0].History = &SurfaceHistory{
+				Buttons: []SurfaceHistoryButton{{ID: "btn1", Label: "Run", Action: "nonexistent"}},
+			}
+		},
+		"bad history button url": func(doc *SurfaceDocument) {
+			doc.Tools[0].History = &SurfaceHistory{
+				Buttons: []SurfaceHistoryButton{{ID: "btn1", Label: "Open", URL: "http://insecure.local"}},
+			}
+		},
+		"depth overflow": func(doc *SurfaceDocument) {
+			doc.Tools[0].Sections[1].Groups[0].Groups = []SurfaceSection{{
+				ID: "d2", Layout: "vertical", Groups: []SurfaceSection{{
+					ID: "d3", Layout: "vertical", Groups: []SurfaceSection{{
+						ID: "d4", Layout: "vertical", Groups: []SurfaceSection{{
+							ID: "d5", Layout: "vertical", Groups: []SurfaceSection{{
+								ID: "d6", Layout: "vertical",
+							}},
+						}},
+					}},
+				}},
+			}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var cloned SurfaceDocument
+			_ = json.Unmarshal(raw, &cloned)
+			mutate(&cloned)
+			if !errors.Is(cloned.Validate(m), ErrSurface) {
+				t.Fatalf("expected ErrSurface for %s", name)
+			}
+		})
+	}
+}
+
 func FuzzDecodeSurfaces(f *testing.F) {
 	f.Add(echoSurface(f))
 	f.Fuzz(func(t *testing.T, data []byte) {

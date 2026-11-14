@@ -26,12 +26,55 @@ type SurfaceDocument struct {
 }
 
 type ToolSurface struct {
-	ID       ToolID          `json:"id"`
-	Modes    []SurfaceMode   `json:"modes,omitempty"`
-	Fields   []SurfaceField  `json:"fields"`
-	Actions  []SurfaceAction `json:"actions"`
-	Helpers  []SurfaceHelper `json:"helpers,omitempty"`
-	Settings []SurfaceField  `json:"settings,omitempty"`
+	ID       ToolID           `json:"id"`
+	Modes    []SurfaceMode    `json:"modes,omitempty"`
+	Sections []SurfaceSection `json:"sections,omitempty"`
+	Fields   []SurfaceField   `json:"fields"`
+	Actions  []SurfaceAction  `json:"actions"`
+	Helpers  []SurfaceHelper  `json:"helpers,omitempty"`
+	Settings []SurfaceField   `json:"settings,omitempty"`
+	History  *SurfaceHistory  `json:"history,omitempty"`
+}
+
+// SurfaceHistory configures the declarative history sidebar for a tool workspace.
+type SurfaceHistory struct {
+	Disabled      bool                   `json:"disabled,omitempty"`
+	Title         string                 `json:"title,omitempty"`
+	EmptyTitle    string                 `json:"empty_title,omitempty"`
+	EmptySubtitle string                 `json:"empty_subtitle,omitempty"`
+	ShowHide      bool                   `json:"show_hide,omitempty"`
+	HideClearAll  bool                   `json:"hide_clear_all,omitempty"`
+	DefaultWidth  int                    `json:"default_width,omitempty"`
+	Buttons       []SurfaceHistoryButton `json:"buttons,omitempty"`
+}
+
+// SurfaceHistoryButton attaches a custom action button to the history sidebar header.
+// It can trigger a declared tool action, reveal the output folder ("open_output_dir"),
+// or open an https URL.
+type SurfaceHistoryButton struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Action string `json:"action,omitempty"`
+	URL    string `json:"url,omitempty"`
+}
+
+// SurfaceSection groups fields and actions into a declarative layout.
+type SurfaceSection struct {
+	ID          string           `json:"id"`
+	Label       string           `json:"label,omitempty"`
+	Layout      string           `json:"layout"` // vertical, horizontal, wrap, grid, primary, tabs, collapsible, card, input_row
+	Columns     int              `json:"columns,omitempty"`
+	DefaultOpen bool             `json:"default_open,omitempty"`
+	Fields      []string         `json:"fields,omitempty"`
+	Actions     []string         `json:"actions,omitempty"`
+	Groups      []SurfaceSection `json:"groups,omitempty"`
+}
+
+// SurfaceCondition declares when a field should be visible based on another field's value.
+type SurfaceCondition struct {
+	Field     string `json:"field"`
+	Equals    string `json:"equals,omitempty"`
+	NotEquals string `json:"not_equals,omitempty"`
 }
 
 type SurfaceMode struct {
@@ -46,17 +89,24 @@ type SurfaceHelper struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	InstallURL  string `json:"install_url,omitempty"`
+	Required    bool   `json:"required,omitempty"`
 }
 
 type SurfaceField struct {
-	ID       string          `json:"id"`
-	Kind     string          `json:"kind"` // text, choice, select, toggle, files, directory; settings also allow file
-	Label    string          `json:"label"`
-	Required bool            `json:"required"`
-	Default  string          `json:"default"`
-	Options  []SurfaceOption `json:"options,omitempty"`
-	Dynamic  bool            `json:"dynamic,omitempty"`
-	// Description, Placeholder and Action are only meaningful for settings.
+	ID          string            `json:"id"`
+	Kind        string            `json:"kind"` // text, choice, select, toggle, file, files, directory, checklist, chips
+	Label       string            `json:"label"`
+	Hint        string            `json:"hint,omitempty"`
+	HideLabel   bool              `json:"hide_label,omitempty"`
+	Required    bool              `json:"required"`
+	Default     string            `json:"default"`
+	Options     []SurfaceOption   `json:"options,omitempty"`
+	Dynamic     bool              `json:"dynamic,omitempty"`
+	Grow        bool              `json:"grow,omitempty"`
+	Flex        int               `json:"flex,omitempty"`
+	Style       string            `json:"style,omitempty"` // "" or "chip"
+	VisibleWhen *SurfaceCondition `json:"visible_when,omitempty"`
+	// Description, Placeholder and Action are only meaningful for settings (or text/file placeholders).
 	Description string              `json:"description,omitempty"`
 	Placeholder string              `json:"placeholder,omitempty"`
 	Action      *SurfaceFieldAction `json:"action,omitempty"`
@@ -75,11 +125,13 @@ type SurfaceFieldAction struct {
 type SurfaceOption struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
+	Meta  string `json:"meta,omitempty"`
 }
 
 type SurfaceAction struct {
 	ID     string   `json:"id"`
 	Label  string   `json:"label"`
+	Kind   string   `json:"kind,omitempty"` // "" or "run" (default), or "inspect"
 	Inputs []string `json:"inputs"`
 }
 
@@ -128,13 +180,21 @@ func (d SurfaceDocument) Validate(m Manifest) error {
 				return ErrSurface
 			}
 			fields[f.ID] = true
-			if f.Kind != "choice" && f.Kind != "select" && len(f.Options) != 0 {
+			if f.Kind != "text" && f.Kind != "choice" && f.Kind != "select" && f.Kind != "checklist" && f.Kind != "chips" && len(f.Options) != 0 {
+				return ErrSurface
+			}
+			if !textOK(f.Placeholder, 256, false) || !textOK(f.Hint, 120, false) || f.Flex < 0 || f.Flex > 12 || (f.Style != "" && f.Style != "chip") {
 				return ErrSurface
 			}
 			switch f.Kind {
 			case "text":
 				if !textOK(f.Default, 8192, false) {
 					return ErrSurface
+				}
+				if len(f.Options) > 0 {
+					if err := validateFieldOptions(f.Options, "", true); err != nil {
+						return err
+					}
 				}
 			case "toggle":
 				if f.Default != "" && f.Default != "true" && f.Default != "false" {
@@ -144,17 +204,18 @@ func (d SurfaceDocument) Validate(m Manifest) error {
 				if !f.Dynamic && len(f.Options) == 0 {
 					return ErrSurface
 				}
-				if len(f.Options) > 128 {
+				if err := validateFieldOptions(f.Options, f.Default, true); err != nil {
+					return err
+				}
+			case "checklist", "chips":
+				if !f.Dynamic && len(f.Options) == 0 {
 					return ErrSurface
 				}
-				values, labels := make(map[string]bool), make(map[string]bool)
-				for _, o := range f.Options {
-					if !textOK(o.Label, 120, true) || !textOK(o.Value, 128, true) || values[o.Value] || labels[o.Label] {
-						return ErrSurface
-					}
-					values[o.Value], labels[o.Label] = true, true
+				if err := validateFieldOptions(f.Options, "", false); err != nil {
+					return err
 				}
-				if f.Default != "" && len(f.Options) > 0 && !values[f.Default] {
+			case "file":
+				if !caps(FilesRead) || !textOK(f.Default, 1024, false) {
 					return ErrSurface
 				}
 			case "files":
@@ -162,16 +223,28 @@ func (d SurfaceDocument) Validate(m Manifest) error {
 					return ErrSurface
 				}
 			case "directory":
-				if !caps(FilesWrite) || f.Default != "" {
+				if !caps(FilesWrite) || !textOK(f.Default, 1024, false) {
 					return ErrSurface
 				}
 			default:
 				return ErrSurface
 			}
 		}
+		for _, f := range t.Fields {
+			if f.VisibleWhen != nil {
+				if !fields[f.VisibleWhen.Field] || f.VisibleWhen.Field == f.ID ||
+					(f.VisibleWhen.Equals == "" && f.VisibleWhen.NotEquals == "") ||
+					!textOK(f.VisibleWhen.Equals, 128, false) || !textOK(f.VisibleWhen.NotEquals, 128, false) {
+					return ErrSurface
+				}
+			}
+		}
 		actions := make(map[string]bool)
 		for _, a := range t.Actions {
 			if !localIDPattern.MatchString(a.ID) || actions[a.ID] || !textOK(a.Label, 120, true) || len(a.Inputs) > 64 {
+				return ErrSurface
+			}
+			if a.Kind != "" && a.Kind != "run" && a.Kind != "inspect" {
 				return ErrSurface
 			}
 			actions[a.ID] = true
@@ -182,6 +255,9 @@ func (d SurfaceDocument) Validate(m Manifest) error {
 				}
 				seen[id] = true
 			}
+		}
+		if err := validateSections(t.Sections, fields, actions, 0); err != nil {
+			return err
 		}
 		if len(t.Modes) > 16 {
 			return ErrSurface
@@ -214,6 +290,66 @@ func (d SurfaceDocument) Validate(m Manifest) error {
 		}
 		if err := validateSettings(t, actions); err != nil {
 			return err
+		}
+		if err := validateHistory(t, actions); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFieldOptions(options []SurfaceOption, defaultVal string, uniqueLabels bool) error {
+	if len(options) > 128 {
+		return ErrSurface
+	}
+	values, labels := make(map[string]bool), make(map[string]bool)
+	for _, o := range options {
+		if !textOK(o.Label, 120, true) || !textOK(o.Value, 128, true) || !textOK(o.Meta, 120, false) || values[o.Value] || (uniqueLabels && labels[o.Label]) {
+			return ErrSurface
+		}
+		values[o.Value], labels[o.Label] = true, true
+	}
+	if defaultVal != "" && len(options) > 0 && !values[defaultVal] {
+		return ErrSurface
+	}
+	return nil
+}
+
+func validateSections(sections []SurfaceSection, fields, actions map[string]bool, depth int) error {
+	if depth > 5 || len(sections) > 32 {
+		return ErrSurface
+	}
+	seen := make(map[string]bool)
+	for _, s := range sections {
+		if !localIDPattern.MatchString(s.ID) || seen[s.ID] || !textOK(s.Label, 120, false) {
+			return ErrSurface
+		}
+		seen[s.ID] = true
+		switch s.Layout {
+		case "", "vertical", "horizontal", "wrap", "grid", "primary", "tabs", "collapsible", "card", "input_row":
+		default:
+			return ErrSurface
+		}
+		if s.Columns != 0 && (s.Layout != "grid" || s.Columns < 2 || s.Columns > 4) {
+			return ErrSurface
+		}
+		if len(s.Fields) > 64 || len(s.Actions) > 16 {
+			return ErrSurface
+		}
+		for _, fID := range s.Fields {
+			if !fields[fID] {
+				return ErrSurface
+			}
+		}
+		for _, aID := range s.Actions {
+			if !actions[aID] {
+				return ErrSurface
+			}
+		}
+		if len(s.Groups) > 0 {
+			if err := validateSections(s.Groups, fields, actions, depth+1); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -278,6 +414,41 @@ func validateSettings(t ToolSurface, actions map[string]bool) error {
 	return nil
 }
 
+func validateHistory(t ToolSurface, actions map[string]bool) error {
+	h := t.History
+	if h == nil {
+		return nil
+	}
+	if !textOK(h.Title, 120, false) || !textOK(h.EmptyTitle, 120, false) || !textOK(h.EmptySubtitle, 256, false) {
+		return ErrSurface
+	}
+	if h.DefaultWidth != 0 && (h.DefaultWidth < 260 || h.DefaultWidth > 600) {
+		return ErrSurface
+	}
+	if len(h.Buttons) > 8 {
+		return ErrSurface
+	}
+	seen := make(map[string]bool)
+	for _, b := range h.Buttons {
+		if !localIDPattern.MatchString(b.ID) || seen[b.ID] || !textOK(b.Label, 80, true) {
+			return ErrSurface
+		}
+		seen[b.ID] = true
+		hasAction := b.Action != ""
+		hasURL := b.URL != ""
+		if hasAction == hasURL {
+			return ErrSurface
+		}
+		if hasAction && b.Action != "open_output_dir" && !actions[b.Action] {
+			return ErrSurface
+		}
+		if hasURL && (!textOK(b.URL, 1024, true) || !strings.HasPrefix(b.URL, "https://")) {
+			return ErrSurface
+		}
+	}
+	return nil
+}
+
 // Inputs validates only the selected action's fields and copies their values.
 // File existence/access is a worker boundary; this checks the portable wire shape.
 func (t ToolSurface) Inputs(action string, values map[string][]string) (map[string][]string, error) {
@@ -292,7 +463,8 @@ func (t ToolSurface) Inputs(action string, values map[string][]string) (map[stri
 			return nil, ErrSurface
 		}
 		f, v := t.Fields[i], values[id]
-		if len(v) > 256 || (f.Kind != "files" && len(v) > 1) ||
+		multi := f.Kind == "files" || f.Kind == "checklist" || f.Kind == "chips"
+		if len(v) > 256 || (!multi && len(v) > 1) ||
 			(f.Required && (len(v) == 0 || (len(v) == 1 && strings.TrimSpace(v[0]) == ""))) {
 			return nil, &InputError{Field: id}
 		}
@@ -305,13 +477,28 @@ func (t ToolSurface) Inputs(action string, values map[string][]string) (map[stri
 				if s != "" && len(f.Options) > 0 && !slices.ContainsFunc(f.Options, func(o SurfaceOption) bool { return o.Value == s }) {
 					return nil, &InputError{Field: id}
 				}
+			case "checklist", "chips":
+				if s != "" && len(f.Options) > 0 && !slices.ContainsFunc(f.Options, func(o SurfaceOption) bool { return o.Value == s }) {
+					return nil, &InputError{Field: id}
+				}
 			case "toggle":
 				if s != "true" && s != "false" {
 					return nil, &InputError{Field: id}
 				}
-			case "files", "directory":
+			case "file":
+				if s != "" && (!filepath.IsAbs(s) || filepath.Clean(s) != s) {
+					return nil, &InputError{Field: id}
+				}
+			case "files":
 				if !filepath.IsAbs(s) || filepath.Clean(s) != s {
 					return nil, &InputError{Field: id}
+				}
+			case "directory":
+				if s != "" {
+					isHomeRel := s == "~" || (strings.HasPrefix(s, "~/") && !strings.Contains(s, ".."))
+					if !isHomeRel && (!filepath.IsAbs(s) || filepath.Clean(s) != s) {
+						return nil, &InputError{Field: id}
+					}
 				}
 			case "text":
 			default:
