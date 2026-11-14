@@ -122,3 +122,43 @@ func TestHistoryPanelToast(t *testing.T) {
 		t.Fatalf("expected toast dismiss callback called")
 	}
 }
+
+func TestHistoryPanelHeaderButtonsAndShowHide(t *testing.T) {
+	customClicked := false
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		HistoryPanel(c, HistoryPanelProps{
+			Title:    "Download History",
+			Count:    1,
+			ShowHide: false,
+			Items: []HistoryCardItem{
+				{ID: "1", Title: "Clip", FilePath: "/tmp/clip.mp4"},
+			},
+			HeaderButtons: []HistoryHeaderButton{
+				{
+					ID:    "open_folder",
+					Label: "Open Folder",
+					OnClick: func() {
+						customClicked = true
+					},
+				},
+			},
+			OnHide: func() {},
+		})
+	}, 320, 500)
+
+	tt.Frame()
+
+	if tt.HasText("Hide »") {
+		t.Fatalf("expected 'Hide »' button to be hidden when ShowHide is false")
+	}
+	if !tt.HasText("Open Folder") {
+		t.Fatalf("expected custom header button 'Open Folder'")
+	}
+	if err := tt.Click("Open Folder"); err != nil {
+		t.Fatalf("Click 'Open Folder' failed: %v", err)
+	}
+	if !customClicked {
+		t.Fatalf("expected customClicked == true")
+	}
+}

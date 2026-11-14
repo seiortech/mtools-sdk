@@ -17,6 +17,13 @@ type HistoryCardItem struct {
 	Badge    string
 }
 
+// HistoryHeaderButton represents a custom button rendered in the history panel header bar.
+type HistoryHeaderButton struct {
+	ID      string
+	Label   string
+	OnClick func()
+}
+
 // HistoryPanelProps configures the shared Bauhaus history panel.
 type HistoryPanelProps struct {
 	Title          string
@@ -29,6 +36,8 @@ type HistoryPanelProps struct {
 	HideLabel      string
 	ShowLabel      string
 	ShowHide       bool
+	HideClearAll   bool
+	HeaderButtons  []HistoryHeaderButton
 	OnHide         func()
 	OnClearAll     func()
 	OnDismissToast func()
@@ -88,8 +97,14 @@ func HistoryPanel(c *ui.Context, props HistoryPanelProps) ui.Element {
 						})
 				})
 
-				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					if props.Count > 0 && props.OnClearAll != nil {
+				ui.Row(c).Wrap().Gap(6).AlignItems(ui.Center).Children(func() {
+					for _, hb := range props.HeaderButtons {
+						btn := hb
+						if btn.Label != "" && btn.OnClick != nil {
+							SecondaryButton(c, btn.Label, btn.OnClick)
+						}
+					}
+					if !props.HideClearAll && props.Count > 0 && props.OnClearAll != nil {
 						SecondaryButton(c, clearAllLabel, props.OnClearAll)
 					}
 					if props.ShowHide && props.OnHide != nil {
