@@ -185,6 +185,27 @@ func runPack(args []string) error {
 		payloads[relPath] = data
 	}
 
+	// Auto-inventory i18n/*.json files when present in the plugin directory
+	if matches, err := filepath.Glob(filepath.Join(baseDir, "i18n", "*.json")); err == nil {
+		for _, fullPath := range matches {
+			relPath := "i18n/" + filepath.Base(fullPath)
+			if _, exists := payloads[relPath]; exists {
+				continue
+			}
+			data, err := os.ReadFile(fullPath)
+			if err != nil {
+				return fmt.Errorf("read locale file %s: %w", relPath, err)
+			}
+			sum := sha256.Sum256(data)
+			m.Files[relPath] = pluginapi.FileInfo{
+				SHA256:     hex.EncodeToString(sum[:]),
+				Size:       int64(len(data)),
+				Executable: false,
+			}
+			payloads[relPath] = data
+		}
+	}
+
 	// Check optional surfaces.json
 	if *surfacesPath != "" {
 		if sData, err := os.ReadFile(*surfacesPath); err == nil {
