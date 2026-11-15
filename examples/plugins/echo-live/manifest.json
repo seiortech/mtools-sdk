@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "org.example.echo-live",
+  "name": "Echo Live Plugin",
+  "version": "1.0.0",
+  "description": "Standalone external plugin demonstrating downloadable Live UI with split panes, keyed lists, and generated PNG assets.",
+  "publisher": {
+    "name": "Example Publisher"
+  },
+  "capabilities": ["process", "ui.live"],
+  "entry": {
+    "kind": "sidecar",
+    "path": "bin/tool",
+    "protocol": "jsonrpc-stdio-v1"
+  },
+  "tools": [
+    {
+      "id": "echo_live",
+      "name": "Echo Live",
+      "description": "Interactive live UI echo workbench.",
+      "category": "Examples"
+    }
+  ]
+}

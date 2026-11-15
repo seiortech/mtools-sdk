@@ -47,6 +47,7 @@ const (
 	Network    Capability = "network"
 	Process    Capability = "process"
 	Clipboard  Capability = "clipboard"
+	UILive     Capability = "ui.live"
 )
 
 // Manifest is signed as exact UTF-8 JSON bytes, not re-encoded JSON.
@@ -226,7 +227,7 @@ func (m Manifest) Validate() error {
 	caps := make(map[Capability]bool)
 	for _, cap := range m.Capabilities {
 		switch cap {
-		case FilesRead, FilesWrite, Network, Process, Clipboard:
+		case FilesRead, FilesWrite, Network, Process, Clipboard, UILive:
 		default:
 			return bad("unknown capability")
 		}

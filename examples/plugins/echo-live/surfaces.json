@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "tools": [
+    {
+      "id": "echo_live",
+      "live": {
+        "initial_title": "Echo Live Workbench"
+      },
+      "fields": [],
+      "actions": [
+        {"id": "save_history", "label": "Save Log", "inputs": []}
+      ]
+    }
+  ]
+}

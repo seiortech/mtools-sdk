@@ -27,6 +27,7 @@ type SurfaceDocument struct {
 
 type ToolSurface struct {
 	ID       ToolID           `json:"id"`
+	Live     *SurfaceLive     `json:"live,omitempty"`
 	Modes    []SurfaceMode    `json:"modes,omitempty"`
 	Sections []SurfaceSection `json:"sections,omitempty"`
 	Fields   []SurfaceField   `json:"fields"`
@@ -34,6 +35,15 @@ type ToolSurface struct {
 	Helpers  []SurfaceHelper  `json:"helpers,omitempty"`
 	Settings []SurfaceField   `json:"settings,omitempty"`
 	History  *SurfaceHistory  `json:"history,omitempty"`
+}
+
+// SurfaceLive marks a tool workspace as driven by a long-lived sidecar via
+// ui.open / ui.tree / ui.event / ui.close while keeping actions and settings
+// host-owned. Mode is "tree" (default, host-rendered UITree).
+type SurfaceLive struct {
+	InitialTitle string `json:"initial_title,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	FullBleed    bool   `json:"full_bleed,omitempty"`
 }
 
 // SurfaceHistory configures the declarative history sidebar for a tool workspace.
@@ -170,8 +180,14 @@ func (d SurfaceDocument) Validate(m Manifest) error {
 	tools := make(map[ToolID]bool)
 	for _, t := range d.Tools {
 		if tools[t.ID] || !slices.ContainsFunc(m.Tools, func(v Tool) bool { return v.ID == t.ID }) ||
-			len(t.Fields) > 64 || len(t.Actions) == 0 || len(t.Actions) > 16 {
+			len(t.Fields) > 64 || len(t.Actions) > 16 || (t.Live == nil && len(t.Actions) == 0) {
 			return ErrSurface
+		}
+		if t.Live != nil {
+			if !caps(UILive) || !textOK(t.Live.InitialTitle, 120, false) ||
+				(t.Live.Mode != "" && t.Live.Mode != "tree") {
+				return ErrSurface
+			}
 		}
 		tools[t.ID] = true
 		fields := make(map[string]bool)
