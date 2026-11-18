@@ -233,9 +233,11 @@ type UIButtonProps struct {
 	Grow        bool               `json:"grow,omitempty"`
 	Tooltip     string             `json:"tooltip,omitempty"`
 	PickFile    *UIFilePickerProps `json:"pick_file,omitempty"`
-	ShellAction string             `json:"shell_action,omitempty"` // "", "reveal", "open"
-	ShellPath   string             `json:"shell_path,omitempty"`
-	DragPayload string             `json:"drag_payload,omitempty"`
+	ShellAction    string             `json:"shell_action,omitempty"` // "", "reveal", "open"
+	ShellPath      string             `json:"shell_path,omitempty"`
+	HostAction     string             `json:"host_action,omitempty"`      // "", "open_app_settings", "run_app_setting_action"
+	HostSettingKey string             `json:"host_setting_key,omitempty"` // e.g. "pdfium_wasm_path"
+	DragPayload    string             `json:"drag_payload,omitempty"`
 	DragImage   string             `json:"drag_image,omitempty"`
 	DragW       int                `json:"drag_w,omitempty"`
 	DragH       int                `json:"drag_h,omitempty"`
@@ -826,6 +828,22 @@ func validButtonProps(p UIButtonProps) bool {
 		}
 	case "reveal", "open":
 		if !textOK(p.ShellPath, 1024, true) {
+			return false
+		}
+	default:
+		return false
+	}
+	switch p.HostAction {
+	case "":
+		if p.HostSettingKey != "" {
+			return false
+		}
+	case "open_app_settings":
+		if p.HostSettingKey != "" {
+			return false
+		}
+	case "run_app_setting_action":
+		if !localIDPattern.MatchString(p.HostSettingKey) {
 			return false
 		}
 	default:

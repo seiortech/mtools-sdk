@@ -272,4 +272,25 @@ func TestUITreeExtendedNodes(t *testing.T) {
 			t.Fatalf("expected valid event %+v, got %v", ev, err)
 		}
 	}
+
+	validHostBtns := []UIButtonProps{
+		{Label: "Settings", HostAction: "open_app_settings"},
+		{Label: "Download", HostAction: "run_app_setting_action", HostSettingKey: "pdfium_wasm_path"},
+	}
+	for _, bp := range validHostBtns {
+		if !validButtonProps(bp) {
+			t.Fatalf("expected valid button props: %+v", bp)
+		}
+	}
+	invalidHostBtns := []UIButtonProps{
+		{Label: "Bad", HostAction: "unknown_action"},
+		{Label: "MissingKey", HostAction: "run_app_setting_action"},
+		{Label: "ExtraKey", HostAction: "open_app_settings", HostSettingKey: "pdfium_wasm_path"},
+		{Label: "OrphanKey", HostSettingKey: "pdfium_wasm_path"},
+	}
+	for _, bp := range invalidHostBtns {
+		if validButtonProps(bp) {
+			t.Fatalf("expected invalid button props: %+v", bp)
+		}
+	}
 }

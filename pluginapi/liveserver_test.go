@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"sync"
 	"testing"
 )
 
@@ -97,5 +98,46 @@ func TestServeLiveLifecycle(t *testing.T) {
 	send(Message{JSONRPC: "2.0", Method: MethodUIClose, Params: closeParams})
 	if err := <-done; err != nil {
 		t.Fatalf("ServeLive exited with error: %v", err)
+	}
+}
+
+func TestUISessionRenderConcurrentOrder(t *testing.T) {
+	var mu sync.Mutex
+	var revs []uint64
+	s := &UISession{
+		write: func(m Message) error {
+			tree, err := DecodeTree(m.Params)
+			if err != nil {
+				return err
+			}
+			mu.Lock()
+			revs = append(revs, tree.Rev)
+			mu.Unlock()
+			return nil
+		},
+	}
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := s.Render(UITree{
+				Root: UINode{ID: "root", Kind: UINodeColumn},
+			})
+			if err != nil {
+				t.Errorf("Render failed: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if len(revs) != 16 {
+		t.Fatalf("expected 16 rendered trees, got %d", len(revs))
+	}
+	for i := 1; i < len(revs); i++ {
+		if revs[i] <= revs[i-1] {
+			t.Fatalf("out-of-order revisions on wire: %v", revs)
+		}
 	}
 }

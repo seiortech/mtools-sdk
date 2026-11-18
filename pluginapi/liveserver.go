@@ -37,24 +37,24 @@ func (s *UISession) AssetsDir() string {
 // must be strictly greater than any previously sent revision.
 func (s *UISession) Render(tree UITree) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if tree.Rev == 0 {
 		tree.Rev = s.rev + 1
 	} else if tree.Rev <= s.rev {
-		s.mu.Unlock()
 		return ErrUITree
 	}
 	if err := tree.Validate(); err != nil {
-		s.mu.Unlock()
 		return err
 	}
 	raw, err := json.Marshal(tree)
 	if err != nil {
-		s.mu.Unlock()
 		return ErrUITree
 	}
+	if err := s.write(Message{JSONRPC: "2.0", Method: MethodUITree, Params: raw}); err != nil {
+		return err
+	}
 	s.rev = tree.Rev
-	s.mu.Unlock()
-	return s.write(Message{JSONRPC: "2.0", Method: MethodUITree, Params: raw})
+	return nil
 }
 
 func (s *UISession) adoptOpenTree(tree UITree) (UITree, error) {
