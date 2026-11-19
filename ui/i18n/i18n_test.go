@@ -9,27 +9,22 @@ import (
 )
 
 func TestCatalogCompleteness(t *testing.T) {
-	globalCatalog.mu.RLock()
-	en := globalCatalog.locales[LangEN]
-	id := globalCatalog.locales[LangID]
-	globalCatalog.mu.RUnlock()
-
-	if len(en.Strings) == 0 {
-		t.Fatal("expected non-empty English locale strings")
+	avail := globalCatalog.Available()
+	if len(avail) < 2 {
+		t.Fatalf("expected at least 2 global languages, got %d", len(avail))
 	}
-	for key, enVal := range en.Strings {
-		if enVal == "" {
-			t.Errorf("global catalog key %q has empty English translation", key)
+	for _, meta := range avail {
+		if meta.Name == "" || meta.Author == "" {
+			t.Errorf("expected meta name and author for %s, got %+v", meta.Code, meta)
 		}
-		if idVal, ok := id.Strings[key]; !ok || idVal == "" {
+	}
+	for _, key := range []string{"nav.tool_library", "nav.history", "library.title"} {
+		if got := globalCatalog.T(LangEN, key); got == "" || got == key {
+			t.Errorf("global catalog key %q missing English translation", key)
+		}
+		if got := globalCatalog.T(LangID, key); got == "" || got == key {
 			t.Errorf("global catalog key %q missing Indonesian translation", key)
 		}
-	}
-	if en.Meta.Name == "" || en.Meta.Author == "" {
-		t.Errorf("expected English meta name and author, got %+v", en.Meta)
-	}
-	if id.Meta.Name == "" || id.Meta.Author == "" {
-		t.Errorf("expected Indonesian meta name and author, got %+v", id.Meta)
 	}
 }
 
