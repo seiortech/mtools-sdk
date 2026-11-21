@@ -10,10 +10,12 @@ import (
 )
 
 type fakeLiveUI struct {
-	events []UIEvent
+	events         []UIEvent
+	sharedToolsDir string
 }
 
 func (f *fakeLiveUI) Open(ctx context.Context, p UIOpenParams, s *UISession) (UITree, error) {
+	f.sharedToolsDir = s.SharedToolsDir()
 	return UITree{
 		Root: UINode{
 			ID:   "root",
@@ -72,11 +74,18 @@ func TestServeLiveLifecycle(t *testing.T) {
 		t.Fatalf("unexpected init reply: %+v", r1)
 	}
 
-	openParams, _ := json.Marshal(UIOpenParams{Tool: "echo", Viewport: UIViewport{Width: 800, Height: 600}})
+	openParams, _ := json.Marshal(UIOpenParams{
+		Tool:     "echo",
+		Viewport: UIViewport{Width: 800, Height: 600},
+		Settings: map[string]string{SettingSharedToolsDir: "/tmp/mtools-shared-tools"},
+	})
 	send(Message{JSONRPC: "2.0", ID: 2, Method: MethodUIOpen, Params: openParams})
 	r2 := recv()
 	if r2.ID != 2 || r2.Error != nil {
 		t.Fatalf("unexpected open reply: %+v", r2)
+	}
+	if live.sharedToolsDir != "/tmp/mtools-shared-tools" {
+		t.Fatalf("expected session.SharedToolsDir() == /tmp/mtools-shared-tools, got %q", live.sharedToolsDir)
 	}
 	tree, err := DecodeTree(r2.Result)
 	if err != nil || tree.Rev != 1 {

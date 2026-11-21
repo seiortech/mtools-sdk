@@ -58,6 +58,17 @@ type InspectParams struct {
 	Settings map[string]string   `json:"settings,omitempty"`
 }
 
+// SharedTools returns a SharedToolsProvider backed by p.Settings and
+// $MTOOLS_SHARED_TOOLS_DIR.
+func (p InspectParams) SharedTools() SharedToolsProvider {
+	return NewSharedTools(p.Settings)
+}
+
+// SharedToolsDir returns the effective default shared tools directory.
+func (p InspectParams) SharedToolsDir() string {
+	return p.SharedTools().SharedToolsDir()
+}
+
 type InspectPreview struct {
 	Title        string   `json:"title"`
 	Subtitle     string   `json:"subtitle,omitempty"`
@@ -97,6 +108,17 @@ type RunParams struct {
 	Action   string              `json:"action"`
 	Inputs   map[string][]string `json:"inputs"`
 	Settings map[string]string   `json:"settings"`
+}
+
+// SharedTools returns a SharedToolsProvider backed by p.Settings and
+// $MTOOLS_SHARED_TOOLS_DIR.
+func (p RunParams) SharedTools() SharedToolsProvider {
+	return NewSharedTools(p.Settings)
+}
+
+// SharedToolsDir returns the effective default shared tools directory.
+func (p RunParams) SharedToolsDir() string {
+	return p.SharedTools().SharedToolsDir()
 }
 
 type Progress struct {

@@ -17,19 +17,45 @@ type LiveUI interface {
 	Event(ctx context.Context, event UIEvent, session *UISession) error
 }
 
-// UISession lets a LiveUI plugin push updated UI trees and locate its private
-// asset directory ($MTOOLS_UI_ASSETS).
+// UISession lets a LiveUI plugin push updated UI trees, locate its private
+// asset directory ($MTOOLS_UI_ASSETS), and access the host's shared tools
+// directory and cross-plugin binary resolver.
 type UISession struct {
-	mu     sync.Mutex
-	rev    uint64
-	write  func(Message) error
-	assets string
+	mu          sync.Mutex
+	rev         uint64
+	write       func(Message) error
+	assets      string
+	sharedTools SharedToolsProvider
 }
 
 // AssetsDir returns the host-provided private directory for image assets
 // referenced as "asset:<name>".
 func (s *UISession) AssetsDir() string {
 	return s.assets
+}
+
+// SharedTools returns the SharedToolsProvider for this session, backed by the
+// host-forwarded settings from ui.open and $MTOOLS_SHARED_TOOLS_DIR.
+func (s *UISession) SharedTools() SharedToolsProvider {
+	s.mu.Lock()
+	st := s.sharedTools
+	s.mu.Unlock()
+	if st == nil {
+		return NewSharedTools(nil)
+	}
+	return st
+}
+
+// SharedToolsDir returns the effective default shared tools directory
+// configured by the user in App Settings (default: <PathUserData>/tools).
+func (s *UISession) SharedToolsDir() string {
+	return s.SharedTools().SharedToolsDir()
+}
+
+func (s *UISession) setSharedTools(st SharedToolsProvider) {
+	s.mu.Lock()
+	s.sharedTools = st
+	s.mu.Unlock()
 }
 
 // Render validates and pushes a full replacement UITree to the host. If
@@ -124,8 +150,9 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 	}
 
 	session := &UISession{
-		write:  write,
-		assets: os.Getenv("MTOOLS_UI_ASSETS"),
+		write:       write,
+		assets:      os.Getenv("MTOOLS_UI_ASSETS"),
+		sharedTools: NewSharedTools(nil),
 	}
 
 	type completion struct {
@@ -188,6 +215,7 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 				if !initialized || uiOpened || m.ID == 0 || DecodePayload(m.Params, &p) != nil || p.Validate() != nil {
 					return ErrProtocol
 				}
+				session.setSharedTools(NewSharedTools(p.Settings))
 				tree, err := live.Open(ctx, p, session)
 				if err != nil {
 					if err := reply(m.ID, nil, &RPCError{Code: -32000, Message: "UI open failed"}); err != nil {

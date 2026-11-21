@@ -83,6 +83,17 @@ type UIOpenParams struct {
 	Settings map[string]string `json:"settings,omitempty"`
 }
 
+// SharedTools returns a SharedToolsProvider backed by p.Settings and
+// $MTOOLS_SHARED_TOOLS_DIR.
+func (p UIOpenParams) SharedTools() SharedToolsProvider {
+	return NewSharedTools(p.Settings)
+}
+
+// SharedToolsDir returns the effective default shared tools directory.
+func (p UIOpenParams) SharedToolsDir() string {
+	return p.SharedTools().SharedToolsDir()
+}
+
 func (p UIOpenParams) Validate() error {
 	if !localIDPattern.MatchString(string(p.Tool)) {
 		return ErrProtocol
