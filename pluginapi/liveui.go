@@ -18,9 +18,10 @@ const (
 
 	MaxUINodes      = 2048
 	MaxUIDepth      = 32
-	MaxUITextBytes  = 8192
-	MaxUIAssetBytes = 32 << 20
-	MaxUICanvasOps  = 4096
+	MaxUITextBytes       = 8192
+	MaxUIAssetBytes      = 32 << 20
+	MaxUIVideoAssetBytes = 256 << 20
+	MaxUICanvasOps       = 4096
 )
 
 const (
@@ -31,6 +32,7 @@ const (
 	UINodeButton     = "button"
 	UINodeTextInput  = "text_input"
 	UINodeImage      = "image"
+	UINodeVideo      = "video"
 	UINodeSplit      = "split"
 	UINodeList       = "list"
 	UINodeProgress   = "progress"
@@ -63,6 +65,7 @@ const (
 	UIEventScroll      = "scroll"
 	UIEventZoom        = "zoom"
 	UIEventShortcut    = "shortcut"
+	UIEventMedia       = "media"
 	UIEventClose       = "close"
 )
 
@@ -130,7 +133,7 @@ func (e UIEvent) Validate() error {
 	switch e.Kind {
 	case UIEventClick, UIEventDoubleClick, UIEventChange, UIEventSubmit, UIEventSelect, UIEventToggle,
 		UIEventResize, UIEventDragEnd, UIEventDrop, UIEventStroke, UIEventView, UIEventScroll, UIEventZoom,
-		UIEventShortcut, UIEventClose:
+		UIEventShortcut, UIEventMedia, UIEventClose:
 	default:
 		return ErrProtocol
 	}
@@ -258,6 +261,7 @@ type UIButtonProps struct {
 type UITextInputProps struct {
 	Value       string `json:"value,omitempty"`
 	Placeholder string `json:"placeholder,omitempty"`
+	Width       int    `json:"width,omitempty"`
 	Disabled    bool   `json:"disabled,omitempty"`
 	Grow        bool   `json:"grow,omitempty"`
 }
@@ -271,6 +275,30 @@ type UIImageProps struct {
 	MaxWidth  int    `json:"max_width,omitempty"`
 	MaxHeight int    `json:"max_height,omitempty"`
 	Grow      bool   `json:"grow,omitempty"`
+}
+
+type UIVideoProps struct {
+	Src        string   `json:"src"`                  // "file:<authorized-path>" or "asset:<name>"
+	Fit        string   `json:"fit,omitempty"`        // "", "contain", "cover"
+	Width      int      `json:"width,omitempty"`
+	Height     int      `json:"height,omitempty"`
+	MaxWidth   int      `json:"max_width,omitempty"`
+	MaxHeight  int      `json:"max_height,omitempty"`
+	Grow       bool     `json:"grow,omitempty"`
+	Fill       bool     `json:"fill,omitempty"`
+	Borderless bool     `json:"borderless,omitempty"`
+	Playing    bool     `json:"playing,omitempty"`
+	PlaySeq    uint64   `json:"play_seq,omitempty"`
+	SeekSec    float64  `json:"seek_sec,omitempty"`
+	SeekSeq    uint64   `json:"seek_seq,omitempty"`
+	Rate       float64  `json:"rate,omitempty"`       // 0 (default 1.0) or 0.25..4.0
+	Volume     *float64 `json:"volume,omitempty"`     // nil (default 1.0) or 0.0..1.0
+	Muted      bool     `json:"muted,omitempty"`
+	Loop       bool     `json:"loop,omitempty"`
+	LoopStart  float64  `json:"loop_start,omitempty"`
+	LoopEnd    float64  `json:"loop_end,omitempty"`
+	Poster     string   `json:"poster,omitempty"`     // optional "asset:<name>"
+	Surface    string   `json:"surface,omitempty"`    // "", "stage", "ground", "paper"
 }
 
 type UISplitProps struct {
@@ -312,6 +340,7 @@ type UISelectProps struct {
 	Label    string          `json:"label,omitempty"`
 	Value    string          `json:"value,omitempty"`
 	Options  []SurfaceOption `json:"options"`
+	Style    string          `json:"style,omitempty"` // "", "chips", "dropdown"
 	Disabled bool            `json:"disabled,omitempty"`
 }
 
@@ -323,8 +352,9 @@ type UIToggleProps struct {
 }
 
 type UITabsProps struct {
-	Active string          `json:"active"`
-	Tabs   []SurfaceOption `json:"tabs"`
+	Active  string          `json:"active"`
+	Tabs    []SurfaceOption `json:"tabs"`
+	Compact bool            `json:"compact,omitempty"`
 }
 
 type UIFilePickerProps struct {
@@ -374,6 +404,7 @@ type UIDialogProps struct {
 	Title       string `json:"title,omitempty"`
 	Subtitle    string `json:"subtitle,omitempty"`
 	Open        bool   `json:"open"`
+	Blocking    bool   `json:"blocking,omitempty"`
 	Width       int    `json:"width,omitempty"`
 	MaxWidth    int    `json:"max_width,omitempty"`
 	BorderWidth int    `json:"border_width,omitempty"`
@@ -519,7 +550,8 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 		}
 		p, err := DecodeProps[UITextInputProps](n)
 		if err != nil || !utf8.ValidString(p.Value) || len(p.Value) > MaxUITextBytes ||
-			bytes.IndexByte([]byte(p.Value), 0) >= 0 || !textOK(p.Placeholder, 256, false) {
+			bytes.IndexByte([]byte(p.Value), 0) >= 0 || !textOK(p.Placeholder, 256, false) ||
+			p.Width < 0 || p.Width > 4096 {
 			return ErrUITree
 		}
 	case UINodeImage:
@@ -534,6 +566,34 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 		}
 		switch p.Fit {
 		case "", "contain", "cover":
+		default:
+			return ErrUITree
+		}
+	case UINodeVideo:
+		if len(n.Children) != 0 {
+			return ErrUITree
+		}
+		p, err := DecodeProps[UIVideoProps](n)
+		if err != nil || !ValidUIVideoSrc(p.Src) ||
+			(p.Poster != "" && !ValidUIAssetRef(p.Poster)) ||
+			p.Width < 0 || p.Width > 8192 || p.Height < 0 || p.Height > 8192 ||
+			p.MaxWidth < 0 || p.MaxWidth > 8192 || p.MaxHeight < 0 || p.MaxHeight > 8192 ||
+			!finite64(p.SeekSec) || p.SeekSec < 0 || p.SeekSec > 86400*7 ||
+			!finite64(p.LoopStart) || p.LoopStart < 0 || p.LoopStart > 86400*7 ||
+			!finite64(p.LoopEnd) || p.LoopEnd < 0 || p.LoopEnd > 86400*7 ||
+			!finite64(p.Rate) || (p.Rate != 0 && (p.Rate < 0.25 || p.Rate > 4.0)) {
+			return ErrUITree
+		}
+		if p.Volume != nil && (!finite64(*p.Volume) || *p.Volume < 0 || *p.Volume > 1) {
+			return ErrUITree
+		}
+		switch p.Fit {
+		case "", "contain", "cover":
+		default:
+			return ErrUITree
+		}
+		switch p.Surface {
+		case "", "stage", "ground", "paper":
 		default:
 			return ErrUITree
 		}
@@ -596,6 +656,11 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 		p, err := DecodeProps[UISelectProps](n)
 		if err != nil || !textOK(p.Label, 120, false) || !textOK(p.Value, 128, false) ||
 			len(p.Options) == 0 || len(p.Options) > 128 {
+			return ErrUITree
+		}
+		switch p.Style {
+		case "", "chips", "dropdown":
+		default:
 			return ErrUITree
 		}
 		for _, opt := range p.Options {
@@ -919,6 +984,15 @@ func ValidUIAssetRef(src string) bool {
 		return false
 	}
 	return ValidBundlePath(name)
+}
+
+// ValidUIVideoSrc validates a "file:<path>" or "asset:<name>" reference for live UI video nodes.
+func ValidUIVideoSrc(src string) bool {
+	if ValidUIAssetRef(src) {
+		return true
+	}
+	path, ok := strings.CutPrefix(src, "file:")
+	return ok && textOK(path, 1024, true)
 }
 
 func finiteNonNeg32(v float32) bool {

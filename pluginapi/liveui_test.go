@@ -294,3 +294,97 @@ func TestUITreeExtendedNodes(t *testing.T) {
 		}
 	}
 }
+
+func TestVideoSelectStyleAndTextInputWidthValidation(t *testing.T) {
+	toProps := func(v any) map[string]json.RawMessage {
+		raw, _ := json.Marshal(v)
+		var out map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &out)
+		return out
+	}
+	vol := 0.8
+	valid := UITree{
+		Rev: 1,
+		Root: UINode{
+			ID:   "root",
+			Kind: UINodeColumn,
+			Children: []UINode{
+				{
+					ID:   "vid",
+					Kind: UINodeVideo,
+					Props: toProps(UIVideoProps{
+						Src:        "file:/tmp/demo.mp4",
+						Fit:        "contain",
+						Surface:    "stage",
+						Fill:       true,
+						Borderless: true,
+						Rate:       1.5,
+						Volume:     &vol,
+						Poster:     "asset:poster.jpg",
+					}),
+				},
+				{
+					ID:   "loading_modal",
+					Kind: UINodeDialog,
+					Props: toProps(UIDialogProps{
+						Title:    "Loading media…",
+						Open:     true,
+						Blocking: true,
+						Width:    420,
+					}),
+				},
+				{
+					ID:   "sel",
+					Kind: UINodeSelect,
+					Props: toProps(UISelectProps{
+						Label:   "Container",
+						Value:   "mp4",
+						Style:   "dropdown",
+						Options: []SurfaceOption{{Label: "MP4", Value: "mp4"}},
+					}),
+				},
+				{
+					ID:   "inp",
+					Kind: UINodeTextInput,
+					Props: toProps(UITextInputProps{
+						Value: "00:10",
+						Width: 78,
+					}),
+				},
+				{
+					ID:   "compact_tabs",
+					Kind: UINodeTabs,
+					Props: toProps(UITabsProps{
+						Active:  "a",
+						Compact: true,
+						Tabs:    []SurfaceOption{{Label: "A", Value: "a"}, {Label: "B", Value: "b"}},
+					}),
+				},
+			},
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid video/select/input tree, got %v", err)
+	}
+	if err := (UIEvent{Rev: 1, Node: "vid", Kind: UIEventMedia, Value: "pos=1.200|dur=10.000|playing=1|ended=0|ready=1|err="}).Validate(); err != nil {
+		t.Fatalf("expected valid UIEventMedia, got %v", err)
+	}
+
+	invalidCases := []struct {
+		name string
+		raw  string
+	}{
+		{"video_http_src", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"https://example.com/a.mp4"}}}`},
+		{"video_bad_rate", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"asset:a.mp4","rate":10}}}`},
+		{"video_bad_volume", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"asset:a.mp4","volume":1.5}}}`},
+		{"video_bad_surface", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"asset:a.mp4","surface":"ink"}}}`},
+		{"video_children", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"asset:a.mp4"},"children":[{"id":"c","kind":"column"}]}}`},
+		{"select_bad_style", `{"rev":1,"root":{"id":"s","kind":"select","props":{"style":"pills","options":[{"label":"A","value":"a"}]}}}`},
+		{"input_bad_width", `{"rev":1,"root":{"id":"i","kind":"text_input","props":{"width":9999}}}`},
+	}
+	for _, tc := range invalidCases {
+		if _, err := DecodeTree([]byte(tc.raw)); err == nil {
+			t.Fatalf("case %s: expected ErrUITree, got nil", tc.name)
+		}
+	}
+}
