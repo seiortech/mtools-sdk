@@ -388,3 +388,67 @@ func TestVideoSelectStyleAndTextInputWidthValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveCanvasBindAndScrimValidation(t *testing.T) {
+	toProps := func(v any) map[string]json.RawMessage {
+		raw, _ := json.Marshal(v)
+		var out map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &out)
+		return out
+	}
+
+	valid := UITree{
+		Rev: 1,
+		Root: UINode{
+			ID:   "root",
+			Kind: UINodeColumn,
+			Children: []UINode{
+				{
+					ID:   "time_lbl",
+					Kind: UINodeText,
+					Props: toProps(UITextProps{
+						Text:          "00:00.0 / 02:00.0",
+						BindVideoTime: "video_player",
+						BindDuration:  120,
+						TabularNums:   true,
+					}),
+				},
+				{
+					ID:   "trim_canvas",
+					Kind: UINodeCanvas,
+					Props: toProps(UICanvasProps{
+						Width:         600,
+						Height:        52,
+						Clickable:     true,
+						BindVideo:     "video_player",
+						BindDuration:  120,
+						BindPos:       12.5,
+						PlayheadWidth: 4,
+						Ops: []UICanvasOp{
+							{Kind: "rect", Token: "scrim", X: 0, Y: 0, W: 80, H: 52},
+						},
+					}),
+				},
+			},
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid scrim & video-bound HUD tree, got %v", err)
+	}
+
+	invalidCases := []struct {
+		name string
+		raw  string
+	}{
+		{"bad_canvas_bind_video", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"bind_video":"Bad ID!"}}}`},
+		{"bad_canvas_duration", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"bind_duration":-1}}}`},
+		{"bad_canvas_playhead_w", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"playhead_width":30}}}`},
+		{"bad_text_bind_video", `{"rev":1,"root":{"id":"t","kind":"text","props":{"text":"00:00","bind_video_time":"Bad ID!"}}}`},
+		{"bad_text_duration", `{"rev":1,"root":{"id":"t","kind":"text","props":{"text":"00:00","bind_duration":-5}}}`},
+	}
+	for _, tc := range invalidCases {
+		if _, err := DecodeTree([]byte(tc.raw)); err == nil {
+			t.Fatalf("case %s: expected ErrUITree, got nil", tc.name)
+		}
+	}
+}

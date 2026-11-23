@@ -60,9 +60,12 @@ var (
 	BorderQuiet    = Sage
 	Field          = MidSage
 
-	mu          sync.RWMutex
-	currentMode = ModeSystem
-	isDarkTheme = false
+	mu               sync.RWMutex
+	currentMode      = ModeSystem
+	isDarkTheme      = false
+	tokensInit       = false
+	cachedLightTheme = buildSageTheme(false)
+	cachedDarkTheme  = buildSageTheme(true)
 )
 
 func setDarkTokens(dark bool) {
@@ -142,51 +145,83 @@ func Apply(c *ui.Context, mode Mode) bool {
 
 	mu.Lock()
 	currentMode = mode
-	isDarkTheme = dark
-	setDarkTokens(dark)
+	if !tokensInit || isDarkTheme != dark {
+		isDarkTheme = dark
+		tokensInit = true
+		setDarkTokens(dark)
+	}
 	mu.Unlock()
 
 	if c != nil {
-		c.SetTheme(SageThemeFor(dark))
+		c.SetTheme(cachedSageTheme(dark))
 	}
 	return dark
 }
 
-// SageThemeFor returns a Bauhaus x Sage Garden theme for the requested brightness.
-func SageThemeFor(dark bool) *ui.Theme {
+func cachedSageTheme(dark bool) *ui.Theme {
+	if dark {
+		return cachedDarkTheme
+	}
+	return cachedLightTheme
+}
+
+func buildSageTheme(dark bool) *ui.Theme {
 	var t *ui.Theme
 	if dark {
 		t = ui.DarkTheme()
+		t.Background = ui.Hex("#1F2822")
+		t.Surface = ui.Hex("#33422F")
+		t.SurfaceHover = ui.Hex("#3E513B")
+		t.SurfacePressed = ui.Hex("#1F2822")
+		t.Border = ui.Hex("#F7F9F3")
+		t.Text = ui.Hex("#F7F9F3")
+		t.TextMuted = PaleSage
+		t.Accent = PaleSage
+		t.AccentHover = MistSage
+		t.AccentPressed = Sage
+		t.AccentText = ui.Hex("#1F2822")
+		t.InactiveAccent = PaleSage
+		t.Selection = ui.RGBA(181, 199, 174, 0.25)
+		t.Focus = ui.Hex("#F7F9F3")
+		t.Inverse = ui.Hex("#F7F9F3")
+		t.InverseText = ui.Hex("#33422F")
+		t.Scrollbar = ui.RGBA(247, 249, 243, 0.35)
 	} else {
 		t = ui.LightTheme()
+		t.Background = MistSage
+		t.Surface = ui.Hex("#F7F9F3")
+		t.SurfaceHover = ui.Hex("#E8EEE5")
+		t.SurfacePressed = MistSage
+		t.Border = ui.Hex("#1F2822")
+		t.Text = ui.Hex("#1F2822")
+		t.TextMuted = DeepSage
+		t.Accent = DeepSage
+		t.AccentHover = ui.Hex("#3E513B")
+		t.AccentPressed = ui.Hex("#33422F")
+		t.AccentText = ui.Hex("#F7F9F3")
+		t.InactiveAccent = DeepSage
+		t.Selection = ui.RGBA(74, 93, 69, 0.18)
+		t.Focus = ui.Hex("#1F2822")
+		t.Inverse = ui.Hex("#1F2822")
+		t.InverseText = ui.Hex("#F7F9F3")
+		t.Scrollbar = ui.RGBA(31, 40, 34, 0.35)
 	}
-	t.Background = Ground
-	t.Surface = Paper
-	t.SurfaceHover = SurfaceHover
-	t.SurfacePressed = SurfacePressed
-	t.Border = Ink
-	t.Text = Ink
-	t.TextMuted = InkMuted
-	t.Accent = Accent
-	t.AccentHover = AccentHover
-	t.AccentPressed = AccentPressed
-	t.AccentText = OnField
-	t.InactiveAccent = InkMuted
 	t.Danger = Danger
 	t.Warning = Warning
 	t.Success = Success
-	t.Selection = Selection
-	t.Focus = Ink
 	t.FocusRingWidth = 3
 	t.FocusRingOffset = 2
-	t.Inverse = Ink
-	t.InverseText = Paper
-	t.Scrollbar = Scrollbar
 	t.Radius = 0
 	t.Spacing = 4
 	t.FontSize = 15
 	t.Font = "Bauhaus Host, system-ui, -apple-system, Segoe UI, sans-serif"
 	return t
+}
+
+// SageThemeFor returns a Bauhaus x Sage Garden theme copy for the requested brightness.
+func SageThemeFor(dark bool) *ui.Theme {
+	cp := *cachedSageTheme(dark)
+	return &cp
 }
 
 // SageTheme returns the default Bauhaus x Sage Garden design system theme.

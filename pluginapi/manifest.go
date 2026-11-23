@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 	"unicode/utf8"
 )
@@ -301,6 +302,21 @@ func checkJSON(data []byte) error {
 	return checkJSONShape(data, reflect.TypeFor[Manifest]())
 }
 
+var jsonStructFieldsCache sync.Map // reflect.Type -> map[string]reflect.Type
+
+func cachedStructJSONFields(t reflect.Type) map[string]reflect.Type {
+	if v, ok := jsonStructFieldsCache.Load(t); ok {
+		return v.(map[string]reflect.Type)
+	}
+	fields := make(map[string]reflect.Type, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		fields[strings.Split(field.Tag.Get("json"), ",")[0]] = field.Type
+	}
+	actual, _ := jsonStructFieldsCache.LoadOrStore(t, fields)
+	return actual.(map[string]reflect.Type)
+}
+
 // checkJSONShape also validates RPC envelopes and typed payloads. RawMessage
 // subtrees may have arbitrary keys, but still reject duplicates/nulls/deep JSON.
 func checkJSONShape(data []byte, root reflect.Type) error {
@@ -329,12 +345,9 @@ func checkJSONShape(data []byte, root reflect.Type) error {
 			if !dynamic && shape.Kind() != reflect.Struct && shape.Kind() != reflect.Map {
 				return errors.New("unexpected JSON object")
 			}
-			fields := make(map[string]reflect.Type)
+			var fields map[string]reflect.Type
 			if shape.Kind() == reflect.Struct {
-				for i := 0; i < shape.NumField(); i++ {
-					field := shape.Field(i)
-					fields[strings.Split(field.Tag.Get("json"), ",")[0]] = field.Type
-				}
+				fields = cachedStructJSONFields(shape)
 			}
 			keys := make(map[string]bool)
 			for d.More() {

@@ -214,17 +214,19 @@ type UIContainerProps struct {
 }
 
 type UITextProps struct {
-	Text        string `json:"text"`
-	Variant     string `json:"variant,omitempty"` // "", "title", "heading", "body", "muted", "accent", "danger", "success", "on_field"
-	FontSize    int    `json:"font_size,omitempty"`
-	FontWeight  int    `json:"font_weight,omitempty"`
-	Align       string `json:"align,omitempty"` // "", "left", "center", "right"
-	SingleLine  bool   `json:"single_line,omitempty"`
-	TabularNums bool   `json:"tabular_nums,omitempty"`
-	PaddingV    int    `json:"padding_v,omitempty"`
-	PaddingH    int    `json:"padding_h,omitempty"`
-	Tooltip     string `json:"tooltip,omitempty"`
-	Grow        bool   `json:"grow,omitempty"`
+	Text          string  `json:"text"`
+	Variant       string  `json:"variant,omitempty"` // "", "title", "heading", "body", "muted", "accent", "danger", "success", "on_field"
+	FontSize      int     `json:"font_size,omitempty"`
+	FontWeight    int     `json:"font_weight,omitempty"`
+	Align         string  `json:"align,omitempty"` // "", "left", "center", "right"
+	SingleLine    bool    `json:"single_line,omitempty"`
+	TabularNums   bool    `json:"tabular_nums,omitempty"`
+	PaddingV      int     `json:"padding_v,omitempty"`
+	PaddingH      int     `json:"padding_h,omitempty"`
+	Tooltip       string  `json:"tooltip,omitempty"`
+	Grow          bool    `json:"grow,omitempty"`
+	BindVideoTime string  `json:"bind_video_time,omitempty"` // optional video node ID for 0-IPC live timecode
+	BindDuration  float64 `json:"bind_duration,omitempty"`   // fallback duration in seconds for live timecode
 }
 
 type UIButtonProps struct {
@@ -420,7 +422,7 @@ type UIIconProps struct {
 
 type UICanvasOp struct {
 	Kind   string    `json:"kind"`            // "rect", "line", "stroke_path", "image", "text"
-	Token  string    `json:"token,omitempty"` // "", "ink", "blue_ink", "muted", "paper", "ground", "accent", "field_support", "warning", "danger"
+	Token  string    `json:"token,omitempty"` // "", "ink", "blue_ink", "muted", "paper", "ground", "accent", "field_support", "warning", "danger", "scrim"
 	X      float64   `json:"x,omitempty"`
 	Y      float64   `json:"y,omitempty"`
 	W      float64   `json:"w,omitempty"`
@@ -446,6 +448,10 @@ type UICanvasProps struct {
 	DropTarget    bool         `json:"drop_target,omitempty"`
 	DropHighlight bool         `json:"drop_highlight,omitempty"`
 	Clickable     bool         `json:"clickable,omitempty"`
+	BindVideo     string       `json:"bind_video,omitempty"`     // optional video node ID for 0-IPC live playhead & scrub
+	BindDuration  float64      `json:"bind_duration,omitempty"`  // media duration in seconds for bound playhead
+	BindPos       float64      `json:"bind_pos,omitempty"`       // fallback position in seconds
+	PlayheadWidth int          `json:"playhead_width,omitempty"` // optional live playhead shaft width (default 4 DIP)
 	Ops           []UICanvasOp `json:"ops,omitempty"`
 }
 
@@ -523,7 +529,9 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 			bytes.IndexByte([]byte(p.Text), 0) >= 0 ||
 			p.FontSize < 0 || p.FontSize > 96 || p.FontWeight < 0 || p.FontWeight > 900 ||
 			p.PaddingV < 0 || p.PaddingV > 128 || p.PaddingH < 0 || p.PaddingH > 128 ||
-			!textOK(p.Tooltip, 256, false) {
+			!textOK(p.Tooltip, 256, false) ||
+			(p.BindVideoTime != "" && !uiNodeIDPattern.MatchString(p.BindVideoTime)) ||
+			!finite64(p.BindDuration) || p.BindDuration < 0 || p.BindDuration > 86400*7 {
 			return ErrUITree
 		}
 		switch p.Variant {
@@ -760,7 +768,11 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 		if err != nil || p.Width <= 0 || p.Width > 8192 || p.Height <= 0 || p.Height > 8192 ||
 			!finite64(p.BrushWidth) || p.BrushWidth < 0 || p.BrushWidth > 64 ||
 			p.BorderWidth < 0 || p.BorderWidth > 16 ||
-			p.Shadow[0] < 0 || p.Shadow[0] > 32 || p.Shadow[1] < 0 || p.Shadow[1] > 32 {
+			p.Shadow[0] < 0 || p.Shadow[0] > 32 || p.Shadow[1] < 0 || p.Shadow[1] > 32 ||
+			(p.BindVideo != "" && !uiNodeIDPattern.MatchString(p.BindVideo)) ||
+			!finite64(p.BindDuration) || p.BindDuration < 0 || p.BindDuration > 86400*7 ||
+			!finite64(p.BindPos) || p.BindPos < 0 || p.BindPos > 86400*7 ||
+			p.PlayheadWidth < 0 || p.PlayheadWidth > 24 {
 			return ErrUITree
 		}
 		switch p.Surface {
@@ -797,7 +809,7 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 
 func validateUICanvasOp(op UICanvasOp) error {
 	switch op.Token {
-	case "", "ink", "blue_ink", "muted", "paper", "ground", "accent", "field_support", "warning", "danger":
+	case "", "ink", "blue_ink", "muted", "paper", "ground", "accent", "field_support", "warning", "danger", "scrim":
 	default:
 		return ErrUITree
 	}
