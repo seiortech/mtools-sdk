@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/egoist/mygo v0.8.3
-	github.com/seiortech/mtools-sdk v0.2.8
+	github.com/seiortech/mtools-sdk v0.2.9-0.20261123070128-e27e8267983d
 )
 
 require (
