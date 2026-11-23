@@ -299,8 +299,10 @@ type UIVideoProps struct {
 	Loop       bool     `json:"loop,omitempty"`
 	LoopStart  float64  `json:"loop_start,omitempty"`
 	LoopEnd    float64  `json:"loop_end,omitempty"`
-	Poster     string   `json:"poster,omitempty"`     // optional "asset:<name>"
-	Surface    string   `json:"surface,omitempty"`    // "", "stage", "ground", "paper"
+	ClampStart float64  `json:"clamp_start,omitempty"` // optional playback lower bound in seconds
+	ClampEnd   float64  `json:"clamp_end,omitempty"`   // optional playback upper bound in seconds (active when ClampEnd > ClampStart)
+	Poster     string   `json:"poster,omitempty"`      // optional "asset:<name>"
+	Surface    string   `json:"surface,omitempty"`     // "", "stage", "ground", "paper"
 }
 
 type UISplitProps struct {
@@ -430,6 +432,7 @@ type UICanvasOp struct {
 	Width  float64   `json:"width,omitempty"`
 	Points []float64 `json:"points,omitempty"`
 	Src    string    `json:"src,omitempty"`
+	Fit    string    `json:"fit,omitempty"` // for Kind=="image": "", "contain", "cover", "fill"
 	Text   string    `json:"text,omitempty"`
 }
 
@@ -451,6 +454,8 @@ type UICanvasProps struct {
 	BindVideo     string       `json:"bind_video,omitempty"`     // optional video node ID for 0-IPC live playhead & scrub
 	BindDuration  float64      `json:"bind_duration,omitempty"`  // media duration in seconds for bound playhead
 	BindPos       float64      `json:"bind_pos,omitempty"`       // fallback position in seconds
+	BindMin       float64      `json:"bind_min,omitempty"`       // optional scrub/playhead lower bound in seconds
+	BindMax       float64      `json:"bind_max,omitempty"`       // optional scrub/playhead upper bound in seconds (active when BindMax > BindMin)
 	PlayheadWidth int          `json:"playhead_width,omitempty"` // optional live playhead shaft width (default 4 DIP)
 	Ops           []UICanvasOp `json:"ops,omitempty"`
 }
@@ -589,6 +594,9 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 			!finite64(p.SeekSec) || p.SeekSec < 0 || p.SeekSec > 86400*7 ||
 			!finite64(p.LoopStart) || p.LoopStart < 0 || p.LoopStart > 86400*7 ||
 			!finite64(p.LoopEnd) || p.LoopEnd < 0 || p.LoopEnd > 86400*7 ||
+			!finite64(p.ClampStart) || p.ClampStart < 0 || p.ClampStart > 86400*7 ||
+			!finite64(p.ClampEnd) || p.ClampEnd < 0 || p.ClampEnd > 86400*7 ||
+			(p.ClampEnd > 0 && p.ClampEnd < p.ClampStart) ||
 			!finite64(p.Rate) || (p.Rate != 0 && (p.Rate < 0.25 || p.Rate > 4.0)) {
 			return ErrUITree
 		}
@@ -772,6 +780,9 @@ func validateUINode(n UINode, depth int, count *int, canvasOps *int, seen map[st
 			(p.BindVideo != "" && !uiNodeIDPattern.MatchString(p.BindVideo)) ||
 			!finite64(p.BindDuration) || p.BindDuration < 0 || p.BindDuration > 86400*7 ||
 			!finite64(p.BindPos) || p.BindPos < 0 || p.BindPos > 86400*7 ||
+			!finite64(p.BindMin) || p.BindMin < 0 || p.BindMin > 86400*7 ||
+			!finite64(p.BindMax) || p.BindMax < 0 || p.BindMax > 86400*7 ||
+			(p.BindMax > 0 && p.BindMax < p.BindMin) ||
 			p.PlayheadWidth < 0 || p.PlayheadWidth > 24 {
 			return ErrUITree
 		}
@@ -817,6 +828,9 @@ func validateUICanvasOp(op UICanvasOp) error {
 		op.W < 0 || op.H < 0 || op.Width < 0 || op.Width > 256 {
 		return ErrUITree
 	}
+	if op.Kind != "image" && op.Fit != "" {
+		return ErrUITree
+	}
 	switch op.Kind {
 	case "rect", "line":
 	case "stroke_path":
@@ -830,6 +844,11 @@ func validateUICanvasOp(op UICanvasOp) error {
 		}
 	case "image":
 		if !ValidUIAssetRef(op.Src) {
+			return ErrUITree
+		}
+		switch op.Fit {
+		case "", "contain", "cover", "fill":
+		default:
 			return ErrUITree
 		}
 	case "text":

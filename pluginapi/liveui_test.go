@@ -452,3 +452,68 @@ func TestLiveCanvasBindAndScrimValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateLiveUITreeCanvasFitAndClamp(t *testing.T) {
+	toProps := func(v any) map[string]json.RawMessage {
+		raw, _ := json.Marshal(v)
+		var out map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &out)
+		return out
+	}
+
+	valid := UITree{
+		Rev: 1,
+		Root: UINode{
+			ID:   "root",
+			Kind: UINodeColumn,
+			Children: []UINode{
+				{
+					ID:   "video_player",
+					Kind: UINodeVideo,
+					Props: toProps(UIVideoProps{
+						Src:        "asset:proxy.mp4",
+						ClampStart: 10,
+						ClampEnd:   45,
+					}),
+				},
+				{
+					ID:   "trim_canvas",
+					Kind: UINodeCanvas,
+					Props: toProps(UICanvasProps{
+						Width:        600,
+						Height:       52,
+						Clickable:    true,
+						BindVideo:    "video_player",
+						BindDuration: 120,
+						BindPos:      15,
+						BindMin:      10,
+						BindMax:      45,
+						Ops: []UICanvasOp{
+							{Kind: "image", Src: "asset:strip.jpg", Fit: "fill", X: 0, Y: 0, W: 600, H: 52},
+						},
+					}),
+				},
+			},
+		},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected valid Fit + BindMin/Max + ClampStart/End tree, got %v", err)
+	}
+
+	invalidCases := []struct {
+		name string
+		raw  string
+	}{
+		{"bad_op_fit", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"ops":[{"kind":"image","src":"asset:a.jpg","fit":"stretch","w":200,"h":50}]}}}`},
+		{"fit_on_non_image", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"ops":[{"kind":"rect","token":"ink","fit":"fill","w":200,"h":50}]}}}`},
+		{"bad_canvas_bind_min_neg", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"bind_min":-1}}}`},
+		{"bad_canvas_bind_inverted", `{"rev":1,"root":{"id":"c","kind":"canvas","props":{"width":200,"height":50,"bind_min":30,"bind_max":10}}}`},
+		{"bad_video_clamp_neg", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"asset:a.mp4","clamp_start":-2}}}`},
+		{"bad_video_clamp_inverted", `{"rev":1,"root":{"id":"v","kind":"video","props":{"src":"asset:a.mp4","clamp_start":50,"clamp_end":20}}}`},
+	}
+	for _, tc := range invalidCases {
+		if _, err := DecodeTree([]byte(tc.raw)); err == nil {
+			t.Fatalf("case %s: expected ErrUITree, got nil", tc.name)
+		}
+	}
+}
