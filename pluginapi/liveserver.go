@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"sync"
 )
@@ -26,6 +28,45 @@ type UISession struct {
 	write       func(Message) error
 	assets      string
 	sharedTools SharedToolsProvider
+	logger      *slog.Logger
+	levelVar    *slog.LevelVar
+}
+
+// Logger returns the structured stderr logger for this Live UI session.
+func (s *UISession) Logger() *slog.Logger {
+	if s == nil {
+		return DefaultLogger()
+	}
+	s.mu.Lock()
+	l := s.logger
+	s.mu.Unlock()
+	if l == nil {
+		return DefaultLogger()
+	}
+	return l
+}
+
+// SetLogLevel updates the session's dynamic log level when backed by ServeLive's
+// default stderr logger.
+func (s *UISession) SetLogLevel(level string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	lv := s.levelVar
+	s.mu.Unlock()
+	if lv != nil {
+		lv.Set(ParseLogLevel(level))
+	}
+}
+
+func (s *UISession) setLogger(l *slog.Logger) {
+	if s == nil || l == nil {
+		return
+	}
+	s.mu.Lock()
+	s.logger = l
+	s.mu.Unlock()
 }
 
 // AssetsDir returns the host-provided private directory for image assets
@@ -149,10 +190,20 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 		return write(m)
 	}
 
+	var levelVar *slog.LevelVar
+	baseLogger, hasExplicitLogger := loggerFromContextExplicit(ctx)
+	if !hasExplicitLogger {
+		levelVar = &slog.LevelVar{}
+		levelVar.Set(EffectiveLogLevel())
+		baseLogger = NewLogger(os.Stderr, &LogHandlerOptions{Level: levelVar})
+	}
+
 	session := &UISession{
 		write:       write,
 		assets:      os.Getenv("MTOOLS_UI_ASSETS"),
 		sharedTools: NewSharedTools(nil),
+		logger:      baseLogger,
+		levelVar:    levelVar,
 	}
 
 	type completion struct {
@@ -216,8 +267,15 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 					return ErrProtocol
 				}
 				session.setSharedTools(NewSharedTools(p.Settings))
-				tree, err := live.Open(ctx, p, session)
+				if p.Settings[SettingLogLevel] != "" {
+					session.SetLogLevel(p.Settings[SettingLogLevel])
+				}
+				scopedLogger := baseLogger.With("tool", string(p.Tool))
+				session.setLogger(scopedLogger)
+				openCtx := WithLogger(ctx, scopedLogger)
+				tree, err := live.Open(openCtx, p, session)
 				if err != nil {
+					scopedLogger.Error("live UI open failed", "err", RedactString(err.Error()))
 					if err := reply(m.ID, nil, &RPCError{Code: -32000, Message: "UI open failed"}); err != nil {
 						return err
 					}
@@ -230,19 +288,22 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 				if err := reply(m.ID, tree, nil); err != nil {
 					return err
 				}
+				scopedLogger.Debug("live UI opened", "rev", tree.Rev)
 				uiOpened = true
 			case MethodUIEvent:
 				var ev UIEvent
 				if !initialized || !uiOpened || m.ID != 0 || DecodePayload(m.Params, &ev) != nil || ev.Validate() != nil {
 					return ErrProtocol
 				}
-				if err := live.Event(ctx, ev, session); err != nil {
+				if err := live.Event(WithLogger(ctx, session.Logger()), ev, session); err != nil {
+					session.Logger().Error("live UI event failed", "node", ev.Node, "kind", ev.Kind, "err", RedactString(err.Error()))
 					return err
 				}
 			case MethodUIClose:
 				if !initialized || m.ID != 0 {
 					return ErrProtocol
 				}
+				session.Logger().Debug("live UI closed")
 				return nil
 			case MethodInspect:
 				inspector, ok := runner.(Inspector)
@@ -256,9 +317,14 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 				if DecodePayload(m.Params, &p) != nil || p.Validate() != nil {
 					return ErrProtocol
 				}
-				res, err := inspector.Inspect(ctx, p)
+				if p.Settings[SettingLogLevel] != "" {
+					session.SetLogLevel(p.Settings[SettingLogLevel])
+				}
+				inspLogger := baseLogger.With("tool", string(p.Tool))
+				res, err := inspector.Inspect(WithLogger(ctx, inspLogger), p)
 				var failure *RPCError
 				if err != nil {
+					inspLogger.Error("inspect failed", "err", RedactString(err.Error()))
 					failure = &RPCError{Code: -32000, Message: "Inspect failed"}
 				}
 				if err := reply(m.ID, res, failure); err != nil {
@@ -270,9 +336,20 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 					DecodePayload(m.Params, &p) != nil || p.Validate() != nil {
 					return ErrProtocol
 				}
-				actionCtx, actionCancel := context.WithCancel(ctx)
+				if p.Settings[SettingLogLevel] != "" {
+					session.SetLogLevel(p.Settings[SettingLogLevel])
+				}
+				runLogger := baseLogger.With("tool", string(p.Tool), "job_id", p.JobID)
+				actionCtx, actionCancel := context.WithCancel(WithLogger(ctx, runLogger))
 				activeID, activeCancel = p.JobID, actionCancel
 				workers.Go(func() {
+					defer func() {
+						if r := recover(); r != nil {
+							runLogger.Error("plugin action panicked", "panic", RedactString(fmt.Sprint(r)))
+							completed <- completion{m.ID, RunResult{}, errors.New("action panicked")}
+						}
+					}()
+					runLogger.Debug("action started", "action", p.Action)
 					emit := func(progress Progress) error {
 						if err := actionCtx.Err(); err != nil {
 							return err
@@ -292,6 +369,14 @@ func ServeLive(ctx context.Context, input io.ReadCloser, output io.Writer, ident
 					}
 					if err == nil {
 						err = result.Validate(p.JobID)
+					}
+					switch {
+					case err == nil:
+						runLogger.Debug("action completed", "action", p.Action, "outputs", len(result.Outputs))
+					case errors.Is(err, context.Canceled):
+						runLogger.Info("action canceled", "action", p.Action)
+					default:
+						runLogger.Error("action failed", "action", p.Action, "err", RedactString(err.Error()))
 					}
 					completed <- completion{m.ID, result, err}
 				})

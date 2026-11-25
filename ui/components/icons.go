@@ -128,4 +128,7 @@ var (
 
 	// IconPlus represents adding media or items.
 	IconPlus = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`))
+
+	// IconLogs represents the Logs Viewer (geometric terminal frame with prompt and lines).
+	IconLogs = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><rect x="2" y="3" width="20" height="18"/><polyline points="6 9 9 12 6 15"/><line x1="12" y1="15" x2="18" y2="15"/><line x1="12" y1="9" x2="18" y2="9"/></svg>`))
 )

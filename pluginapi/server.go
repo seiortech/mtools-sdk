@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"sync"
 )
 
@@ -91,6 +94,13 @@ func Serve(ctx context.Context, input io.ReadCloser, output io.Writer, identity 
 	}
 	completed := make(chan completion, 1)
 	initialized := false
+	var levelVar *slog.LevelVar
+	baseLogger, hasExplicitLogger := loggerFromContextExplicit(ctx)
+	if !hasExplicitLogger {
+		levelVar = &slog.LevelVar{}
+		levelVar.Set(EffectiveLogLevel())
+		baseLogger = NewLogger(os.Stderr, &LogHandlerOptions{Level: levelVar})
+	}
 	var activeID string
 	var activeCancel context.CancelFunc
 	defer func() {
@@ -150,9 +160,14 @@ func Serve(ctx context.Context, input io.ReadCloser, output io.Writer, identity 
 				if DecodePayload(m.Params, &p) != nil || p.Validate() != nil {
 					return ErrProtocol
 				}
-				res, err := inspector.Inspect(ctx, p)
+				if levelVar != nil && p.Settings[SettingLogLevel] != "" {
+					levelVar.Set(ParseLogLevel(p.Settings[SettingLogLevel]))
+				}
+				inspLogger := baseLogger.With("tool", string(p.Tool))
+				res, err := inspector.Inspect(WithLogger(ctx, inspLogger), p)
 				var failure *RPCError
 				if err != nil {
+					inspLogger.Error("inspect failed", "err", RedactString(err.Error()))
 					failure = &RPCError{Code: -32000, Message: "Inspect failed"}
 				}
 				if err := reply(m.ID, res, failure); err != nil {
@@ -164,9 +179,20 @@ func Serve(ctx context.Context, input io.ReadCloser, output io.Writer, identity 
 					DecodePayload(m.Params, &p) != nil || p.Validate() != nil {
 					return ErrProtocol
 				}
-				actionCtx, actionCancel := context.WithCancel(ctx)
+				if levelVar != nil && p.Settings[SettingLogLevel] != "" {
+					levelVar.Set(ParseLogLevel(p.Settings[SettingLogLevel]))
+				}
+				runLogger := baseLogger.With("tool", string(p.Tool), "job_id", p.JobID)
+				actionCtx, actionCancel := context.WithCancel(WithLogger(ctx, runLogger))
 				activeID, activeCancel = p.JobID, actionCancel
 				workers.Go(func() {
+					defer func() {
+						if r := recover(); r != nil {
+							runLogger.Error("plugin action panicked", "panic", RedactString(fmt.Sprint(r)))
+							completed <- completion{m.ID, RunResult{}, errors.New("action panicked")}
+						}
+					}()
+					runLogger.Debug("action started", "action", p.Action)
 					emit := func(progress Progress) error {
 						if err := actionCtx.Err(); err != nil {
 							return err
@@ -186,6 +212,14 @@ func Serve(ctx context.Context, input io.ReadCloser, output io.Writer, identity 
 					}
 					if err == nil {
 						err = result.Validate(p.JobID)
+					}
+					switch {
+					case err == nil:
+						runLogger.Debug("action completed", "action", p.Action, "outputs", len(result.Outputs))
+					case errors.Is(err, context.Canceled):
+						runLogger.Info("action canceled", "action", p.Action)
+					default:
+						runLogger.Error("action failed", "action", p.Action, "err", RedactString(err.Error()))
 					}
 					completed <- completion{m.ID, result, err}
 				})

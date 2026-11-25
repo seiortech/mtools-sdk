@@ -18,6 +18,7 @@ func main() {
 		if p.Tool != "echo" || p.Action != "echo" {
 			return pluginapi.RunResult{}, errors.New("unsupported action")
 		}
+		pluginapi.LoggerFromContext(ctx).Info("echo action executing", "component", "echo", "count", len(p.Inputs["text"]))
 		if err := emit(pluginapi.Progress{JobID: p.JobID, Done: 1, Total: 1, Unit: "actions", Message: "Echo complete"}); err != nil {
 			return pluginapi.RunResult{}, err
 		}

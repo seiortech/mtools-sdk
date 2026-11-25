@@ -48,6 +48,7 @@ func main() {
 }
 
 func (e *echoLive) Open(_ context.Context, _ pluginapi.UIOpenParams, s *pluginapi.UISession) (pluginapi.UITree, error) {
+	s.Logger().Info("echo-live workspace opened", "component", "echo_live")
 	e.writeCard(s.AssetsDir(), "card_0.png", len(e.history))
 	e.cardName = "card_0.png"
 	return e.buildTree(), nil
@@ -68,6 +69,7 @@ func (e *echoLive) Event(_ context.Context, ev pluginapi.UIEvent, s *pluginapi.U
 		e.selected = fmt.Sprintf("item_%d", len(e.history)-1)
 		e.cardName = fmt.Sprintf("card_%d.png", len(e.history))
 		e.writeCard(s.AssetsDir(), e.cardName, len(e.history))
+		s.Logger().Info("echo message added", "component", "echo_live", "count", len(e.history))
 		return s.Render(e.buildTree())
 	case ev.Node == "history" && ev.Kind == pluginapi.UIEventSelect:
 		e.selected = ev.Value
